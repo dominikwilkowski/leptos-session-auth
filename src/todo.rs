@@ -18,12 +18,6 @@ pub mod ssr {
     use super::Todo;
     use crate::auth::{ssr::AuthSession, User};
     use leptos::*;
-    use sqlx::PgPool;
-
-    pub fn pool() -> Result<PgPool, ServerFnError> {
-        use_context::<PgPool>()
-            .ok_or_else(|| ServerFnError::ServerError("Pool missing.".into()))
-    }
 
     pub fn auth() -> Result<AuthSession, ServerFnError> {
         use_context::<AuthSession>().ok_or_else(|| {
@@ -34,17 +28,17 @@ pub mod ssr {
     #[derive(sqlx::FromRow, Clone)]
     pub struct SqlTodo {
         id: i32,
-        user_id: i64,
+        user_id: i32,
         title: String,
         created_at: String,
         completed: bool,
     }
 
     impl SqlTodo {
-        pub async fn into_todo(self, pool: &PgPool) -> Todo {
+        pub async fn into_todo(self) -> Todo {
             Todo {
                 id: self.id,
-                user: User::get(self.user_id, pool).await,
+                user: User::get(self.user_id).await,
                 title: self.title,
                 created_at: self.created_at,
                 completed: self.completed,
@@ -55,27 +49,26 @@ pub mod ssr {
 
 #[server(GetTodos, "/api")]
 pub async fn get_todos() -> Result<Vec<Todo>, ServerFnError> {
-    use self::ssr::{pool, SqlTodo};
+    use self::ssr::SqlTodo;
+    use crate::db::ssr::get_db;
     use futures::future::join_all;
-
-    let pool = pool()?;
 
     Ok(join_all(
         sqlx::query_as::<_, SqlTodo>("SELECT * FROM todos")
-            .fetch_all(&pool)
+            .fetch_all(get_db())
             .await?
             .iter()
-            .map(|todo: &SqlTodo| todo.clone().into_todo(&pool)),
+            .map(|todo: &SqlTodo| todo.clone().into_todo()),
     )
     .await)
 }
 
 #[server(AddTodo, "/api")]
 pub async fn add_todo(title: String) -> Result<(), ServerFnError> {
-    use self::ssr::*;
+    use crate::db::ssr::get_db;
 
     let user = get_user().await?;
-    let pool = pool()?;
+    println!("{user:?}");
 
     let id = match user {
         Some(user) => user.id,
@@ -85,12 +78,12 @@ pub async fn add_todo(title: String) -> Result<(), ServerFnError> {
     // fake API delay
     std::thread::sleep(std::time::Duration::from_millis(1250));
 
-    Ok(sqlx::query(
-        "INSERT INTO todos (title, user_id, completed) VALUES (?, ?, false)",
+    Ok(sqlx::query!(
+        "INSERT INTO todos (title, user_id, completed) VALUES ($1, $2, false)",
+        title,
+        id
     )
-    .bind(title)
-    .bind(id)
-    .execute(&pool)
+    .execute(get_db())
     .await
     .map(|_| ())?)
 }
@@ -98,13 +91,11 @@ pub async fn add_todo(title: String) -> Result<(), ServerFnError> {
 // The struct name and path prefix arguments are optional.
 #[server]
 pub async fn delete_todo(id: u16) -> Result<(), ServerFnError> {
-    use self::ssr::*;
-
-    let pool = pool()?;
+    use crate::db::ssr::get_db;
 
     Ok(sqlx::query("DELETE FROM todos WHERE id = $1")
         .bind(id as i16)
-        .execute(&pool)
+        .execute(get_db())
         .await
         .map(|_| ())?)
 }

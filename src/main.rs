@@ -24,7 +24,7 @@ use session_auth_axum::{
 use sqlx::PgPool;
 
 async fn server_fn_handler(
-    State(app_state): State<AppState>,
+    State(_app_state): State<AppState>,
     auth_session: AuthSession,
     path: Path<String>,
     request: Request<AxumBody>,
@@ -34,7 +34,6 @@ async fn server_fn_handler(
     handle_server_fns_with_context(
         move || {
             provide_context(auth_session.clone());
-            provide_context(app_state.pool.clone());
         },
         request,
     )
@@ -51,7 +50,6 @@ async fn leptos_routes_handler(
         app_state.routes.clone(),
         move || {
             provide_context(auth_session.clone());
-            provide_context(app_state.pool.clone());
         },
         TodoApp,
     );
@@ -70,7 +68,7 @@ async fn main() {
     // Auth section
     let session_config =
         SessionConfig::default().with_table_name("axum_sessions");
-    let auth_config = AuthConfig::<i64>::default();
+    let auth_config = AuthConfig::<i32>::default();
     let session_store = SessionStore::<SessionPgPool>::new(
         Some(SessionPgPool::from(get_db().clone())),
         session_config,
@@ -82,28 +80,14 @@ async fn main() {
         eprintln!("{e:?}");
     }
 
-    // Explicit server function registration is no longer required
-    // on the main branch. On 0.3.0 and earlier, uncomment the lines
-    // below to register the server functions.
-    // _ = GetTodos::register();
-    // _ = AddTodo::register();
-    // _ = DeleteTodo::register();
-    // _ = Login::register();
-    // _ = Logout::register();
-    // _ = Signup::register();
-    // _ = GetUser::register();
-    // _ = Foo::register();
-
     // Setting this to None means we'll be using cargo-leptos and its env vars
     let conf = get_configuration(None).await.unwrap();
     let leptos_options = conf.leptos_options;
     let addr = leptos_options.site_addr;
     let routes = generate_route_list(TodoApp);
 
-    let pool = get_db();
     let app_state = AppState {
         leptos_options,
-        pool: pool.clone(),
         routes: routes.clone(),
     };
 
@@ -116,8 +100,8 @@ async fn main() {
         .leptos_routes_with_handler(routes, get(leptos_routes_handler))
         .fallback(file_and_error_handler)
         .layer(
-            AuthSessionLayer::<User, i64, SessionPgPool, PgPool>::new(Some(
-                pool.clone(),
+            AuthSessionLayer::<User, i32, SessionPgPool, PgPool>::new(Some(
+                get_db().clone(),
             ))
             .with_config(auth_config),
         )
