@@ -30,7 +30,10 @@ pub async fn file_and_error_handler(
     }
 }
 
-async fn get_static_file(uri: Uri, root: &str) -> Result<Response<Body>, (StatusCode, String)> {
+async fn get_static_file(
+    uri: Uri,
+    root: &str,
+) -> Result<Response<Body>, (StatusCode, String)> {
     let req = Request::builder()
         .uri(uri.clone())
         .body(Body::empty())

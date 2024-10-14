@@ -7,7 +7,8 @@ use axum::{
     Router,
 };
 use axum_session::{SessionConfig, SessionLayer, SessionStore};
-use axum_session_auth::{AuthConfig, AuthSessionLayer, SessionSqlitePool};
+use axum_session_auth::{AuthConfig, AuthSessionLayer};
+pub use axum_session_sqlx::SessionSqlitePool;
 use leptos::{get_configuration, logging::log, provide_context};
 use leptos_axum::{
     generate_route_list, handle_server_fns_with_context, LeptosRoutes,
