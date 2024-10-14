@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod db;
 pub mod error_template;
 pub mod errors;
 #[cfg(feature = "ssr")]

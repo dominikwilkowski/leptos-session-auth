@@ -1,3 +1,5 @@
+pub mod db;
+
 use axum::{
     body::Body as AxumBody,
     extract::{Path, State},
@@ -8,7 +10,7 @@ use axum::{
 };
 use axum_session::{SessionConfig, SessionLayer, SessionStore};
 use axum_session_auth::{AuthConfig, AuthSessionLayer};
-pub use axum_session_sqlx::SessionSqlitePool;
+pub use axum_session_sqlx::SessionPgPool;
 use leptos::{get_configuration, logging::log, provide_context};
 use leptos_axum::{
     generate_route_list, handle_server_fns_with_context, LeptosRoutes,
@@ -19,7 +21,7 @@ use session_auth_axum::{
     state::AppState,
     todo::*,
 };
-use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+use sqlx::PgPool;
 
 async fn server_fn_handler(
     State(app_state): State<AppState>,
@@ -58,26 +60,25 @@ async fn leptos_routes_handler(
 
 #[tokio::main]
 async fn main() {
+    use crate::db::ssr::{get_db, init_db};
+
     simple_logger::init_with_level(log::Level::Info)
         .expect("couldn't initialize logging");
 
-    let pool = SqlitePoolOptions::new()
-        .connect("sqlite:Todos.db")
-        .await
-        .expect("Could not make pool.");
+    init_db().await.expect("Initialization of database failed");
 
     // Auth section
     let session_config =
         SessionConfig::default().with_table_name("axum_sessions");
     let auth_config = AuthConfig::<i64>::default();
-    let session_store = SessionStore::<SessionSqlitePool>::new(
-        Some(SessionSqlitePool::from(pool.clone())),
+    let session_store = SessionStore::<SessionPgPool>::new(
+        Some(SessionPgPool::from(get_db().clone())),
         session_config,
     )
     .await
     .unwrap();
 
-    if let Err(e) = sqlx::migrate!().run(&pool).await {
+    if let Err(e) = sqlx::migrate!().run(&get_db().clone()).await {
         eprintln!("{e:?}");
     }
 
@@ -99,6 +100,7 @@ async fn main() {
     let addr = leptos_options.site_addr;
     let routes = generate_route_list(TodoApp);
 
+    let pool = get_db();
     let app_state = AppState {
         leptos_options,
         pool: pool.clone(),
@@ -114,9 +116,9 @@ async fn main() {
         .leptos_routes_with_handler(routes, get(leptos_routes_handler))
         .fallback(file_and_error_handler)
         .layer(
-            AuthSessionLayer::<User, i64, SessionSqlitePool, SqlitePool>::new(
-                Some(pool.clone()),
-            )
+            AuthSessionLayer::<User, i64, SessionPgPool, PgPool>::new(Some(
+                pool.clone(),
+            ))
             .with_config(auth_config),
         )
         .layer(SessionLayer::new(session_store))

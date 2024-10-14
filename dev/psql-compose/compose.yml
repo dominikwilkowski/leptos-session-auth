@@ -1,0 +1,28 @@
+services:
+  postgres:
+    image: postgres:latest
+    container_name: leptossession-postgres
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: leptossession
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - pgnetwork
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - 8888:8080
+    volumes:
+      - ./adminer.css:/var/www/html/adminer.css
+    depends_on:
+      - postgres
+    networks:
+      - pgnetwork
+networks:
+  pgnetwork:
+    driver: bridge

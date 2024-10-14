@@ -2541,6 +2541,7 @@ dependencies = [
  "bcrypt",
  "console_error_panic_hook",
  "console_log",
+ "dotenvy",
  "futures",
  "http",
  "leptos",

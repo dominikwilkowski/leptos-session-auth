@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Todo {
-    id: u32,
+    id: i32,
     user: Option<User>,
     title: String,
     created_at: String,
@@ -18,10 +18,10 @@ pub mod ssr {
     use super::Todo;
     use crate::auth::{ssr::AuthSession, User};
     use leptos::*;
-    use sqlx::SqlitePool;
+    use sqlx::PgPool;
 
-    pub fn pool() -> Result<SqlitePool, ServerFnError> {
-        use_context::<SqlitePool>()
+    pub fn pool() -> Result<PgPool, ServerFnError> {
+        use_context::<PgPool>()
             .ok_or_else(|| ServerFnError::ServerError("Pool missing.".into()))
     }
 
@@ -33,7 +33,7 @@ pub mod ssr {
 
     #[derive(sqlx::FromRow, Clone)]
     pub struct SqlTodo {
-        id: u32,
+        id: i32,
         user_id: i64,
         title: String,
         created_at: String,
@@ -41,7 +41,7 @@ pub mod ssr {
     }
 
     impl SqlTodo {
-        pub async fn into_todo(self, pool: &SqlitePool) -> Todo {
+        pub async fn into_todo(self, pool: &PgPool) -> Todo {
             Todo {
                 id: self.id,
                 user: User::get(self.user_id, pool).await,
@@ -103,7 +103,7 @@ pub async fn delete_todo(id: u16) -> Result<(), ServerFnError> {
     let pool = pool()?;
 
     Ok(sqlx::query("DELETE FROM todos WHERE id = $1")
-        .bind(id)
+        .bind(id as i16)
         .execute(&pool)
         .await
         .map(|_| ())?)

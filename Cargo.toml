@@ -26,15 +26,17 @@ tokio = { version = "1", features = ["full"], optional = true }
 http = { version = "1.0" }
 sqlx = { version = "0.8", features = [
 	"runtime-tokio-rustls",
-	"sqlite",
+	"postgres",
+	"macros",
 ], optional = true }
 thiserror = "1.0"
 wasm-bindgen = "=0.2.93"
 axum_session_auth = { version = "0.14", optional = true }
-axum_session_sqlx = { version = "0.3", features = [ "sqlite", "tls-rustls"], optional = true }
+axum_session_sqlx = { version = "0.3", features = [ "postgres", "tls-rustls"], optional = true }
 axum_session = { version = "0.14", optional = true }
 bcrypt = { version = "0.15", optional = true }
 async-trait = { version = "0.1", optional = true }
+dotenvy = "0.15.7"
 
 [features]
 default = ["ssr"]
