@@ -7,7 +7,7 @@ use sqlx::PgPool;
 /// item in Axum's State. Leptos requires you to have leptosOptions in your State struct for the leptos route handlers
 #[derive(FromRef, Debug, Clone)]
 pub struct AppState {
-    pub leptos_options: LeptosOptions,
-    pub routes: Vec<RouteListing>,
-    pub pool: PgPool,
+	pub leptos_options: LeptosOptions,
+	pub routes: Vec<RouteListing>,
+	pub pool: PgPool,
 }
