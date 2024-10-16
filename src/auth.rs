@@ -33,7 +33,6 @@ pub mod ssr {
 	pub use sqlx::PgPool;
 	pub use std::collections::HashSet;
 	pub type AuthSession = axum_session_auth::AuthSession<User, i32, SessionPgPool, PgPool>;
-	pub use crate::todo::ssr::auth;
 	pub use async_trait::async_trait;
 	pub use bcrypt::{hash, verify, DEFAULT_COST};
 
@@ -42,7 +41,7 @@ pub mod ssr {
 			let sqluser =
 				sqlx::query_as::<_, SqlUser>("SELECT * FROM users WHERE id = $1").bind(id).fetch_one(pool).await.ok()?;
 
-			//lets just get all the tokens the user can use, we will only use the full permissions if modifying them.
+			// let's just get all the tokens the user can use, we will only use the full permissions if modifying them.
 			let sql_user_perms =
 				sqlx::query_as::<_, SqlPermissionTokens>("SELECT token FROM user_permissions WHERE user_id = $1;")
 					.bind(id)
@@ -139,19 +138,19 @@ pub mod ssr {
 
 #[server]
 pub async fn get_user() -> Result<Option<User>, ServerFnError> {
-	use crate::todo::ssr::auth;
+	use crate::auth::ssr::AuthSession;
 
-	let auth = auth()?;
+	let auth = use_context::<AuthSession>().expect("No session found");
 
 	Ok(auth.current_user)
 }
 
-#[server(Login, "/api")]
+#[server]
 pub async fn login(username: String, password: String, remember: Option<String>) -> Result<(), ServerFnError> {
 	use self::ssr::*;
 
 	let pool = use_context::<PgPool>().expect("Database not initialized");
-	let auth = auth()?;
+	let auth = use_context::<AuthSession>().expect("No session found");
 
 	let (user, UserPasshash(expected_passhash)) = User::get_from_username_with_passhash(username, &pool)
 		.await
@@ -168,7 +167,7 @@ pub async fn login(username: String, password: String, remember: Option<String>)
 	}
 }
 
-#[server(Signup, "/api")]
+#[server]
 pub async fn signup(
 	username: String,
 	password: String,
@@ -178,7 +177,7 @@ pub async fn signup(
 	use self::ssr::*;
 
 	let pool = use_context::<PgPool>().expect("Database not initialized");
-	let auth = auth()?;
+	let auth = use_context::<AuthSession>().expect("No session found");
 
 	if password != password_confirmation {
 		return Err(ServerFnError::ServerError("Passwords did not match.".to_string()));
@@ -204,11 +203,11 @@ pub async fn signup(
 	Ok(())
 }
 
-#[server(Logout, "/api")]
+#[server]
 pub async fn logout() -> Result<(), ServerFnError> {
 	use self::ssr::*;
 
-	let auth = auth()?;
+	let auth = use_context::<AuthSession>().expect("No session found");
 
 	auth.logout_user();
 	leptos_axum::redirect("/");

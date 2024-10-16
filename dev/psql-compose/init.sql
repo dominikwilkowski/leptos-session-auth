@@ -1,16 +1,18 @@
 -- init.sql
-CREATE TABLE user_permissions (
-    user_id  INTEGER NOT NULL,
-    token    TEXT NOT NULL
-);
-
 CREATE TABLE users (
   id         INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
   username   TEXT NOT NULL UNIQUE,
   password   TEXT NOT NULL,
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
-INSERT INTO users (username, password) VALUES ('dom', 'x'), ('josh', 'xx');
+INSERT INTO users (username, password) VALUES ('dom', '$2b$12$rgB7bxoyNAjtbGhQHecpHOG83kEipspOvBwmd7KxX0ls9rIHBIkgG'), ('josh', '$2b$12$rgB7bxoyNAjtbGhQHecpHOG83kEipspOvBwmd7KxX0ls9rIHBIkgG');
+-- password: test
+
+CREATE TABLE user_permissions (
+    user_id  INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token    TEXT NOT NULL
+);
+INSERT INTO user_permissions (user_id, token) VALUES (1, 'READ'), (1, 'WRITE'), (2, 'READ');
 
 CREATE TABLE todos (
   id         INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,

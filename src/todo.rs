@@ -17,14 +17,9 @@ pub struct Todo {
 #[cfg(feature = "ssr")]
 pub mod ssr {
 	use super::Todo;
-	use crate::auth::{ssr::AuthSession, User};
+	use crate::auth::User;
 	use chrono::prelude::*;
-	use leptos::*;
 	use sqlx::PgPool;
-
-	pub fn auth() -> Result<AuthSession, ServerFnError> {
-		use_context::<AuthSession>().ok_or_else(|| ServerFnError::ServerError("Auth session missing.".into()))
-	}
 
 	#[derive(sqlx::FromRow, Clone)]
 	pub struct SqlTodo {
@@ -48,7 +43,7 @@ pub mod ssr {
 	}
 }
 
-#[server(GetTodos, "/api")]
+#[server]
 pub async fn get_todos() -> Result<Vec<Todo>, ServerFnError> {
 	use self::ssr::SqlTodo;
 	use futures::future::join_all;
@@ -68,7 +63,7 @@ pub async fn get_todos() -> Result<Vec<Todo>, ServerFnError> {
 	)
 }
 
-#[server(AddTodo, "/api")]
+#[server]
 pub async fn add_todo(title: String) -> Result<(), ServerFnError> {
 	use sqlx::PgPool;
 
@@ -91,7 +86,6 @@ pub async fn add_todo(title: String) -> Result<(), ServerFnError> {
 	)
 }
 
-// The struct name and path prefix arguments are optional.
 #[server]
 pub async fn delete_todo(id: u16) -> Result<(), ServerFnError> {
 	use sqlx::PgPool;
@@ -270,10 +264,10 @@ pub fn Login(action: Action<Login, Result<(), ServerFnError>>) -> impl IntoView 
 		<ActionForm action=action>
 			<h1>"Log In"</h1>
 			<label>
-				"User ID:"
+				"User:"
 				<input
 					type="text"
-					placeholder="User ID"
+					placeholder="User Name"
 					maxlength="32"
 					name="username"
 					class="auth-input"
