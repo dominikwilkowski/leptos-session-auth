@@ -34,20 +34,21 @@ pub mod ssr {
     pub use std::collections::HashSet;
     pub type AuthSession =
         axum_session_auth::AuthSession<User, i32, SessionPgPool, PgPool>;
-    use crate::db::ssr::get_db;
     pub use crate::todo::ssr::auth;
     pub use async_trait::async_trait;
     pub use bcrypt::{hash, verify, DEFAULT_COST};
+    use leptos::*;
 
     impl User {
         pub async fn get_with_passhash(
             id: i32,
         ) -> Option<(Self, UserPasshash)> {
+            let pool = use_context::<PgPool>().unwrap();
             let sqluser = sqlx::query_as::<_, SqlUser>(
                 "SELECT * FROM users WHERE id = ?",
             )
             .bind(id)
-            .fetch_one(get_db())
+            .fetch_one(&pool)
             .await
             .ok()?;
 
@@ -56,7 +57,7 @@ pub mod ssr {
                 "SELECT token FROM user_permissions WHERE user_id = ?;",
             )
             .bind(id)
-            .fetch_all(get_db())
+            .fetch_all(&pool)
             .await
             .ok()?;
 
@@ -70,11 +71,13 @@ pub mod ssr {
         pub async fn get_from_username_with_passhash(
             name: String,
         ) -> Option<(Self, UserPasshash)> {
+            let pool = use_context::<PgPool>().unwrap();
+
             let sqluser = sqlx::query_as::<_, SqlUser>(
                 "SELECT * FROM users WHERE username = ?",
             )
             .bind(name)
-            .fetch_one(get_db())
+            .fetch_one(&pool)
             .await
             .ok()?;
 
@@ -83,7 +86,7 @@ pub mod ssr {
                 "SELECT token FROM user_permissions WHERE user_id = ?;",
             )
             .bind(sqluser.id)
-            .fetch_all(get_db())
+            .fetch_all(&pool)
             .await
             .ok()?;
 
@@ -214,8 +217,8 @@ pub async fn signup(
     remember: Option<String>,
 ) -> Result<(), ServerFnError> {
     use self::ssr::*;
-    use crate::db::ssr::get_db;
 
+    let pool = use_context::<PgPool>().unwrap();
     let auth = auth()?;
 
     if password != password_confirmation {
@@ -229,7 +232,7 @@ pub async fn signup(
     sqlx::query("INSERT INTO users (username, password) VALUES (?,?)")
         .bind(username.clone())
         .bind(password_hashed)
-        .execute(get_db())
+        .execute(&pool)
         .await?;
 
     let user = User::get_from_username(username).await.ok_or_else(|| {

@@ -1,4 +1,5 @@
 use crate::{auth::*, error_template::ErrorTemplate};
+use chrono::prelude::*;
 use leptos::*;
 use leptos_meta::*;
 use leptos_router::*;
@@ -9,7 +10,7 @@ pub struct Todo {
     id: i32,
     user: Option<User>,
     title: String,
-    created_at: String,
+    created_at: DateTime<Utc>,
     completed: bool,
 }
 
@@ -17,6 +18,7 @@ pub struct Todo {
 pub mod ssr {
     use super::Todo;
     use crate::auth::{ssr::AuthSession, User};
+    use chrono::prelude::*;
     use leptos::*;
 
     pub fn auth() -> Result<AuthSession, ServerFnError> {
@@ -30,7 +32,7 @@ pub mod ssr {
         id: i32,
         user_id: i32,
         title: String,
-        created_at: String,
+        created_at: DateTime<Utc>,
         completed: bool,
     }
 
@@ -50,12 +52,14 @@ pub mod ssr {
 #[server(GetTodos, "/api")]
 pub async fn get_todos() -> Result<Vec<Todo>, ServerFnError> {
     use self::ssr::SqlTodo;
-    use crate::db::ssr::get_db;
     use futures::future::join_all;
+    use sqlx::PgPool;
+
+    let pool = use_context::<PgPool>().unwrap();
 
     Ok(join_all(
         sqlx::query_as::<_, SqlTodo>("SELECT * FROM todos")
-            .fetch_all(get_db())
+            .fetch_all(&pool)
             .await?
             .iter()
             .map(|todo: &SqlTodo| todo.clone().into_todo()),
@@ -65,10 +69,10 @@ pub async fn get_todos() -> Result<Vec<Todo>, ServerFnError> {
 
 #[server(AddTodo, "/api")]
 pub async fn add_todo(title: String) -> Result<(), ServerFnError> {
-    use crate::db::ssr::get_db;
+    use sqlx::PgPool;
 
+    let pool = use_context::<PgPool>().unwrap();
     let user = get_user().await?;
-    println!("{user:?}");
 
     let id = match user {
         Some(user) => user.id,
@@ -83,7 +87,7 @@ pub async fn add_todo(title: String) -> Result<(), ServerFnError> {
         title,
         id
     )
-    .execute(get_db())
+    .execute(&pool)
     .await
     .map(|_| ())?)
 }
@@ -233,7 +237,7 @@ pub fn Todos() -> impl IntoView {
                                                     .map(move |todo| {
                                                         view! {
                                                             <li>
-                                                                {todo.title} ": Created at " {todo.created_at} " by "
+                                                                {todo.title} ": Created at " {todo.created_at.to_string()} " by "
                                                                 {todo.user.unwrap_or_default().username}
                                                                 <ActionForm action=delete_todo>
                                                                     <input type="hidden" name="id" value=todo.id/>

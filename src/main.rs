@@ -24,7 +24,7 @@ use session_auth_axum::{
 use sqlx::PgPool;
 
 async fn server_fn_handler(
-    State(_app_state): State<AppState>,
+    State(app_state): State<AppState>,
     auth_session: AuthSession,
     path: Path<String>,
     request: Request<AxumBody>,
@@ -34,6 +34,7 @@ async fn server_fn_handler(
     handle_server_fns_with_context(
         move || {
             provide_context(auth_session.clone());
+            provide_context(app_state.pool.clone());
         },
         request,
     )
@@ -50,6 +51,7 @@ async fn leptos_routes_handler(
         app_state.routes.clone(),
         move || {
             provide_context(auth_session.clone());
+            provide_context(app_state.pool.clone());
         },
         TodoApp,
     );
@@ -89,6 +91,7 @@ async fn main() {
     let app_state = AppState {
         leptos_options,
         routes: routes.clone(),
+        pool: get_db().clone(),
     };
 
     // build our application with a route
