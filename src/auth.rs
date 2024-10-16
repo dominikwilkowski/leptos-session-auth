@@ -36,51 +36,47 @@ pub mod ssr {
 	pub use crate::todo::ssr::auth;
 	pub use async_trait::async_trait;
 	pub use bcrypt::{hash, verify, DEFAULT_COST};
-	use leptos::*;
 
 	impl User {
-		pub async fn get_with_passhash(id: i32) -> Option<(Self, UserPasshash)> {
-			let pool = use_context::<PgPool>().unwrap();
+		pub async fn get_with_passhash(id: i32, pool: &PgPool) -> Option<(Self, UserPasshash)> {
 			let sqluser =
-				sqlx::query_as::<_, SqlUser>("SELECT * FROM users WHERE id = ?").bind(id).fetch_one(&pool).await.ok()?;
+				sqlx::query_as::<_, SqlUser>("SELECT * FROM users WHERE id = $1").bind(id).fetch_one(pool).await.ok()?;
 
 			//lets just get all the tokens the user can use, we will only use the full permissions if modifying them.
 			let sql_user_perms =
-				sqlx::query_as::<_, SqlPermissionTokens>("SELECT token FROM user_permissions WHERE user_id = ?;")
+				sqlx::query_as::<_, SqlPermissionTokens>("SELECT token FROM user_permissions WHERE user_id = $1;")
 					.bind(id)
-					.fetch_all(&pool)
+					.fetch_all(pool)
 					.await
 					.ok()?;
 
 			Some(sqluser.into_user(Some(sql_user_perms)))
 		}
 
-		pub async fn get(id: i32) -> Option<Self> {
-			User::get_with_passhash(id).await.map(|(user, _)| user)
+		pub async fn get(id: i32, pool: &PgPool) -> Option<Self> {
+			User::get_with_passhash(id, pool).await.map(|(user, _)| user)
 		}
 
-		pub async fn get_from_username_with_passhash(name: String) -> Option<(Self, UserPasshash)> {
-			let pool = use_context::<PgPool>().unwrap();
-
-			let sqluser = sqlx::query_as::<_, SqlUser>("SELECT * FROM users WHERE username = ?")
+		pub async fn get_from_username_with_passhash(name: String, pool: &PgPool) -> Option<(Self, UserPasshash)> {
+			let sqluser = sqlx::query_as::<_, SqlUser>("SELECT * FROM users WHERE username = $1")
 				.bind(name)
-				.fetch_one(&pool)
+				.fetch_one(pool)
 				.await
 				.ok()?;
 
 			//lets just get all the tokens the user can use, we will only use the full permissions if modifying them.
 			let sql_user_perms =
-				sqlx::query_as::<_, SqlPermissionTokens>("SELECT token FROM user_permissions WHERE user_id = ?;")
+				sqlx::query_as::<_, SqlPermissionTokens>("SELECT token FROM user_permissions WHERE user_id = $1;")
 					.bind(sqluser.id)
-					.fetch_all(&pool)
+					.fetch_all(pool)
 					.await
 					.ok()?;
 
 			Some(sqluser.into_user(Some(sql_user_perms)))
 		}
 
-		pub async fn get_from_username(name: String) -> Option<Self> {
-			User::get_from_username_with_passhash(name).await.map(|(user, _)| user)
+		pub async fn get_from_username(name: String, pool: &PgPool) -> Option<Self> {
+			User::get_from_username_with_passhash(name, pool).await.map(|(user, _)| user)
 		}
 	}
 
@@ -91,8 +87,9 @@ pub mod ssr {
 
 	#[async_trait]
 	impl Authentication<User, i32, PgPool> for User {
-		async fn load_user(userid: i32, _pool: Option<&PgPool>) -> Result<User, anyhow::Error> {
-			User::get(userid).await.ok_or_else(|| anyhow::anyhow!("Cannot get user"))
+		async fn load_user(userid: i32, pool: Option<&PgPool>) -> Result<User, anyhow::Error> {
+			let pool = pool.unwrap();
+			User::get(userid, pool).await.ok_or_else(|| anyhow::anyhow!("Cannot get user"))
 		}
 
 		fn is_authenticated(&self) -> bool {
@@ -141,11 +138,6 @@ pub mod ssr {
 }
 
 #[server]
-pub async fn foo() -> Result<String, ServerFnError> {
-	Ok(String::from("Bar!"))
-}
-
-#[server]
 pub async fn get_user() -> Result<Option<User>, ServerFnError> {
 	use crate::todo::ssr::auth;
 
@@ -158,10 +150,12 @@ pub async fn get_user() -> Result<Option<User>, ServerFnError> {
 pub async fn login(username: String, password: String, remember: Option<String>) -> Result<(), ServerFnError> {
 	use self::ssr::*;
 
+	let pool = use_context::<PgPool>().expect("Database not initialized");
 	let auth = auth()?;
 
-	let (user, UserPasshash(expected_passhash)) =
-		User::get_from_username_with_passhash(username).await.ok_or_else(|| ServerFnError::new("User does not exist."))?;
+	let (user, UserPasshash(expected_passhash)) = User::get_from_username_with_passhash(username, &pool)
+		.await
+		.ok_or_else(|| ServerFnError::new("User does not exist."))?;
 
 	match verify(password, &expected_passhash)? {
 		true => {
@@ -183,7 +177,7 @@ pub async fn signup(
 ) -> Result<(), ServerFnError> {
 	use self::ssr::*;
 
-	let pool = use_context::<PgPool>().unwrap();
+	let pool = use_context::<PgPool>().expect("Database not initialized");
 	let auth = auth()?;
 
 	if password != password_confirmation {
@@ -192,14 +186,15 @@ pub async fn signup(
 
 	let password_hashed = hash(password, DEFAULT_COST).unwrap();
 
-	sqlx::query("INSERT INTO users (username, password) VALUES (?,?)")
+	sqlx::query("INSERT INTO users (username, password) VALUES ($1, $2)")
 		.bind(username.clone())
 		.bind(password_hashed)
 		.execute(&pool)
 		.await?;
 
-	let user =
-		User::get_from_username(username).await.ok_or_else(|| ServerFnError::new("Signup failed: User does not exist."))?;
+	let user = User::get_from_username(username, &pool)
+		.await
+		.ok_or_else(|| ServerFnError::new("Signup failed: User does not exist."))?;
 
 	auth.login_user(user.id);
 	auth.remember_user(remember.is_some());

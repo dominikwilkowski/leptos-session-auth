@@ -20,6 +20,7 @@ pub mod ssr {
 	use crate::auth::{ssr::AuthSession, User};
 	use chrono::prelude::*;
 	use leptos::*;
+	use sqlx::PgPool;
 
 	pub fn auth() -> Result<AuthSession, ServerFnError> {
 		use_context::<AuthSession>().ok_or_else(|| ServerFnError::ServerError("Auth session missing.".into()))
@@ -35,10 +36,10 @@ pub mod ssr {
 	}
 
 	impl SqlTodo {
-		pub async fn into_todo(self) -> Todo {
+		pub async fn into_todo(self, pool: &PgPool) -> Todo {
 			Todo {
 				id: self.id,
-				user: User::get(self.user_id).await,
+				user: User::get(self.user_id, pool).await,
 				title: self.title,
 				created_at: self.created_at,
 				completed: self.completed,
@@ -53,7 +54,7 @@ pub async fn get_todos() -> Result<Vec<Todo>, ServerFnError> {
 	use futures::future::join_all;
 	use sqlx::PgPool;
 
-	let pool = use_context::<PgPool>().unwrap();
+	let pool = use_context::<PgPool>().expect("Database not initialized");
 
 	Ok(
 		join_all(
@@ -61,7 +62,7 @@ pub async fn get_todos() -> Result<Vec<Todo>, ServerFnError> {
 				.fetch_all(&pool)
 				.await?
 				.iter()
-				.map(|todo: &SqlTodo| todo.clone().into_todo()),
+				.map(|todo: &SqlTodo| todo.clone().into_todo(&pool)),
 		)
 		.await,
 	)
@@ -71,7 +72,7 @@ pub async fn get_todos() -> Result<Vec<Todo>, ServerFnError> {
 pub async fn add_todo(title: String) -> Result<(), ServerFnError> {
 	use sqlx::PgPool;
 
-	let pool = use_context::<PgPool>().unwrap();
+	let pool = use_context::<PgPool>().expect("Database not initialized");
 	let user = get_user().await?;
 
 	let id = match user {
@@ -95,7 +96,7 @@ pub async fn add_todo(title: String) -> Result<(), ServerFnError> {
 pub async fn delete_todo(id: u16) -> Result<(), ServerFnError> {
 	use sqlx::PgPool;
 
-	let pool = use_context::<PgPool>().unwrap();
+	let pool = use_context::<PgPool>().expect("Database not initialized");
 
 	Ok(sqlx::query("DELETE FROM todos WHERE id = $1").bind(id as i16).execute(&pool).await.map(|_| ())?)
 }
@@ -302,10 +303,10 @@ pub fn Signup(action: Action<Signup, Result<(), ServerFnError>>) -> impl IntoVie
 		<ActionForm action=action>
 			<h1>"Sign Up"</h1>
 			<label>
-				"User ID:"
+				"User:"
 				<input
 					type="text"
-					placeholder="User ID"
+					placeholder="User Name"
 					maxlength="32"
 					name="username"
 					class="auth-input"
