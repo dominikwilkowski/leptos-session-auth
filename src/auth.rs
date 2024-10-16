@@ -1,12 +1,11 @@
 use leptos::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct User {
 	pub id: i32,
 	pub username: String,
-	pub permissions: HashSet<String>,
+	pub permissions: Vec<String>,
 }
 
 // Explicitly is not Serialize/Deserialize!
@@ -15,7 +14,7 @@ pub struct UserPasshash(String);
 
 impl Default for User {
 	fn default() -> Self {
-		let permissions = HashSet::new();
+		let permissions = Vec::new();
 
 		Self {
 			id: -1,
@@ -104,12 +103,12 @@ pub mod ssr {
 		}
 	}
 
-	#[async_trait]
-	impl HasPermission<PgPool> for User {
-		async fn has(&self, perm: &str, _pool: &Option<&PgPool>) -> bool {
-			self.permissions.contains(perm)
-		}
-	}
+	// #[async_trait]
+	// impl HasPermission<PgPool> for User {
+	// 	async fn has(&self, perm: &str, _pool: &Option<&PgPool>) -> bool {
+	// 		self.permissions.contains(&perm.to_string())
+	// 	}
+	// }
 
 	#[derive(sqlx::FromRow, Clone)]
 	pub struct SqlUser {
@@ -125,9 +124,9 @@ pub mod ssr {
 					id: self.id,
 					username: self.username,
 					permissions: if let Some(user_perms) = sql_user_perms {
-						user_perms.into_iter().map(|x| x.token).collect::<HashSet<String>>()
+						user_perms.into_iter().map(|x| x.token).collect::<Vec<String>>()
 					} else {
-						HashSet::<String>::new()
+						Vec::<String>::new()
 					},
 				},
 				UserPasshash(self.password),
@@ -154,7 +153,7 @@ pub async fn login(username: String, password: String, remember: Option<String>)
 
 	let (user, UserPasshash(expected_passhash)) = User::get_from_username_with_passhash(username, &pool)
 		.await
-		.ok_or_else(|| ServerFnError::new("User does not exist."))?;
+		.ok_or_else(|| ServerFnError::new("Username or Password does not match."))?;
 
 	match verify(password, &expected_passhash)? {
 		true => {
@@ -163,7 +162,7 @@ pub async fn login(username: String, password: String, remember: Option<String>)
 			leptos_axum::redirect("/");
 			Ok(())
 		},
-		false => Err(ServerFnError::ServerError("Password does not match.".to_string())),
+		false => Err(ServerFnError::ServerError("Username or Password does not match.".to_string())),
 	}
 }
 
