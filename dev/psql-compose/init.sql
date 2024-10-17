@@ -5,8 +5,8 @@ CREATE TABLE users (
   password   TEXT NOT NULL,
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
-INSERT INTO users (username, password) VALUES ('dom', '$2b$12$rgB7bxoyNAjtbGhQHecpHOG83kEipspOvBwmd7KxX0ls9rIHBIkgG'), ('josh', '$2b$12$rgB7bxoyNAjtbGhQHecpHOG83kEipspOvBwmd7KxX0ls9rIHBIkgG');
--- password: test
+INSERT INTO users (username, password) VALUES ('dom', '$argon2id$v=19$m=19456,t=2,p=1$T9GO2wvNWMGcMQ/uPdH8lQ$EjVtyckTRnjly15GvDW3RAo2GvZPT/Dv7prpRDv6YcI'), ('thewizzy', '$argon2id$v=19$m=19456,t=2,p=1$jGpHvsSseOmqYpSjYmHsDw$C/tnsXIf8dEdGojiKDcYis3e7gniaT40jvqIyFzri4c');
+-- password for both: test
 
 CREATE TABLE user_permissions (
     user_id  INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

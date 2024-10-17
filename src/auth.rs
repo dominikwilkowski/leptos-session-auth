@@ -27,13 +27,19 @@ impl Default for User {
 #[cfg(feature = "ssr")]
 pub mod ssr {
 	pub use super::{User, UserPasshash};
+	pub use argon2::{
+		self,
+		password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+		Argon2,
+	};
+	pub use async_trait::async_trait;
 	pub use axum_session_auth::{Authentication, HasPermission};
 	pub use axum_session_sqlx::SessionPgPool;
+	pub use rand::rngs::OsRng;
 	pub use sqlx::PgPool;
 	pub use std::collections::HashSet;
+
 	pub type AuthSession = axum_session_auth::AuthSession<User, i32, SessionPgPool, PgPool>;
-	pub use async_trait::async_trait;
-	pub use bcrypt::{hash, verify, DEFAULT_COST};
 
 	impl User {
 		pub async fn get_with_passhash(id: i32, pool: &PgPool) -> Option<(Self, UserPasshash)> {
@@ -147,6 +153,7 @@ pub async fn get_user() -> Result<Option<User>, ServerFnError> {
 #[server]
 pub async fn login(username: String, password: String, remember: Option<String>) -> Result<(), ServerFnError> {
 	use self::ssr::*;
+	use server_fn::error::NoCustomError;
 
 	let pool = use_context::<PgPool>().expect("Database not initialized");
 	let auth = use_context::<AuthSession>().expect("No session found");
@@ -155,14 +162,17 @@ pub async fn login(username: String, password: String, remember: Option<String>)
 		.await
 		.ok_or_else(|| ServerFnError::new("Username or Password does not match."))?;
 
-	match verify(password, &expected_passhash)? {
-		true => {
+	let parsed_hash = PasswordHash::new(&expected_passhash)
+		.map_err(|error| ServerFnError::<NoCustomError>::ServerError(format!("Hashing parsing error: {}", error)))?;
+
+	match Argon2::default().verify_password(password.as_bytes(), &parsed_hash) {
+		Ok(_) => {
 			auth.login_user(user.id);
 			auth.remember_user(remember.is_some());
 			leptos_axum::redirect("/");
 			Ok(())
 		},
-		false => Err(ServerFnError::ServerError("Username or Password does not match.".to_string())),
+		Err(_) => Err(ServerFnError::ServerError("Username or Password does not match.".to_string())),
 	}
 }
 
@@ -174,6 +184,7 @@ pub async fn signup(
 	remember: Option<String>,
 ) -> Result<(), ServerFnError> {
 	use self::ssr::*;
+	use server_fn::error::NoCustomError;
 
 	let pool = use_context::<PgPool>().expect("Database not initialized");
 	let auth = use_context::<AuthSession>().expect("No session found");
@@ -182,7 +193,12 @@ pub async fn signup(
 		return Err(ServerFnError::ServerError("Passwords did not match.".to_string()));
 	}
 
-	let password_hashed = hash(password, DEFAULT_COST).unwrap();
+	let salt = SaltString::generate(&mut OsRng);
+
+	let password_hashed = Argon2::default()
+		.hash_password(password.as_bytes(), &salt)
+		.map_err(|error| ServerFnError::<NoCustomError>::ServerError(format!("Hashing error: {}", error)))?
+		.to_string();
 
 	sqlx::query("INSERT INTO users (username, password) VALUES ($1, $2)")
 		.bind(username.clone())
