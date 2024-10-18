@@ -10,61 +10,91 @@ pub enum Permission {
 }
 
 impl Permission {
-	pub fn parse(perm: String) -> Result<Permission, String> {
-		match perm.replace(" ", "").replace(")", "").to_uppercase().as_str() {
-			"READ(*" => Ok(Permission::ReadAny),
-			"WRITE(*" => Ok(Permission::WriteAny),
-			cleaned_perm => {
-				let parts = cleaned_perm.split("(").collect::<Vec<&str>>();
-				if parts.len() != 2 {
-					return Err(String::from("Invalid permission string"));
-				}
+	pub fn parse(perm: String) -> Result<(Permission, Permission), String> {
+		let perms = perm.replace(" ", "").replace(")", "").to_uppercase();
+		let perms = perms.split("|").collect::<Vec<&str>>();
+		let mut read = None;
+		let mut write = None;
 
-				let scope = parts[1].split(",").collect::<Vec<&str>>();
-				let mut numbers = Vec::new();
-
-				for item in &scope {
-					match item.parse::<i32>() {
-						Ok(num) => numbers.push(num),
-						Err(_) => return Err(String::from("Invalid permission string")),
+		for perm in perms {
+			match perm.replace(" ", "").replace(")", "").to_uppercase().as_str() {
+				"READ(*" => read = Some(Permission::ReadAny),
+				"WRITE(*" => write = Some(Permission::WriteAny),
+				cleaned_perm => {
+					let parts = cleaned_perm.split("(").collect::<Vec<&str>>();
+					if parts.len() != 2 {
+						return Err(String::from("Invalid permission string"));
 					}
-				}
 
-				match parts[0] {
-					"READ" => Ok(Permission::Read(numbers)),
-					"WRITE" => Ok(Permission::Write(numbers)),
-					_ => Err(String::from("Invalid permission string")),
-				}
-			},
+					let scope = parts[1].split(",").collect::<Vec<&str>>();
+					let mut ids = Vec::new();
+
+					for item in &scope {
+						match item.parse::<i32>() {
+							Ok(id) => ids.push(id),
+							Err(_) => return Err(String::from("Invalid permission string")),
+						}
+					}
+
+					match parts[0] {
+						"READ" => read = Some(Permission::Read(ids)),
+						"WRITE" => write = Some(Permission::Write(ids)),
+						_ => return Err(String::from("Invalid permission string")),
+					}
+				},
+			}
+		}
+
+		// TODO: check that write has at least all of read
+		// READ(1,2)|WRITE(1,2,3) => READ(1,2,3)|WRITE(1,2,3)
+
+		if read.is_none() || write.is_none() {
+			Err(String::from("Invalid permission string"))
+		} else {
+			Ok((read.unwrap(), write.unwrap()))
 		}
 	}
 }
 
 #[test]
 fn permission_parse_test() {
-	assert_eq!(Permission::parse(String::from("READ(*)")), Ok(Permission::ReadAny));
-	assert_eq!(Permission::parse(String::from("READ( * )")), Ok(Permission::ReadAny));
-	assert_eq!(Permission::parse(String::from("READ (*)")), Ok(Permission::ReadAny));
-	assert_eq!(Permission::parse(String::from("read(*)")), Ok(Permission::ReadAny));
-	assert_eq!(Permission::parse(String::from("READ(1,2,4564,789)")), Ok(Permission::Read(vec![1, 2, 4564, 789])));
-	assert_eq!(Permission::parse(String::from("READ(5, 99, 0)")), Ok(Permission::Read(vec![5, 99, 0])));
+	assert_eq!(Permission::parse(String::from("READ(*)|WRITE(*)")), Ok((Permission::ReadAny, Permission::WriteAny)));
+	assert_eq!(Permission::parse(String::from("WRITE(*)|READ(*)")), Ok((Permission::ReadAny, Permission::WriteAny)));
+	assert_eq!(Permission::parse(String::from("READ( * )|WRITE(* )")), Ok((Permission::ReadAny, Permission::WriteAny)));
+	assert_eq!(Permission::parse(String::from("READ (*) | WRITE( *)")), Ok((Permission::ReadAny, Permission::WriteAny)));
+	assert_eq!(Permission::parse(String::from("read(*)|write(*)")), Ok((Permission::ReadAny, Permission::WriteAny)));
+	assert_eq!(
+		Permission::parse(String::from("READ(1,2,4564,789)|WRITE(1,2,3,4)")),
+		Ok((Permission::Read(vec![1, 2, 4564, 789]), Permission::Write(vec![1, 2, 3, 4])))
+	);
+	assert_eq!(
+		Permission::parse(String::from("READ(5, 99, 0) | WRITE(5, 99   , 0 )")),
+		Ok((Permission::Read(vec![5, 99, 0]), Permission::Write(vec![5, 99, 0])))
+	);
 
-	assert_eq!(Permission::parse(String::from("WRITE(*)")), Ok(Permission::WriteAny));
-	assert_eq!(Permission::parse(String::from("WRITE(1,2,3,4)")), Ok(Permission::Write(vec![1, 2, 3, 4])));
-	assert_eq!(Permission::parse(String::from("WRITE(5, 99   , 0 )")), Ok(Permission::Write(vec![5, 99, 0])));
+	assert_eq!(
+		Permission::parse(String::from("READ(1,2)|WRITE(1,2,3)")),
+		Ok((Permission::Read(vec![1, 2, 3]), Permission::Write(vec![1, 2, 3])))
+	);
+	assert_eq!(
+		Permission::parse(String::from("READ(1,2,3)|WRITE(1,2)")),
+		Ok((Permission::Read(vec![1, 2, 3]), Permission::Write(vec![1, 2])))
+	);
 
-	assert_eq!(Permission::parse(String::from("READ")), Err(String::from("Invalid permission string")));
-	assert_eq!(Permission::parse(String::from("READ(1,2,x,4)")), Err(String::from("Invalid permission string")));
-	assert_eq!(Permission::parse(String::from("FOO(1,2,3)")), Err(String::from("Invalid permission string")));
+	assert_eq!(Permission::parse(String::from("READ||WRITE(1)")), Err(String::from("Invalid permission string")));
+	assert_eq!(Permission::parse(String::from("READ(||WRITE(1)")), Err(String::from("Invalid permission string")));
+	assert_eq!(Permission::parse(String::from("READ()|WRITE(1)")), Err(String::from("Invalid permission string")));
+	assert_eq!(Permission::parse(String::from("READ(1,2,x,4)|WRITE(1)")), Err(String::from("Invalid permission string")));
+	assert_eq!(Permission::parse(String::from("FOO(1,2,3)|WRITE(1)")), Err(String::from("Invalid permission string")));
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct User {
 	pub id: i32,
 	pub username: String,
-	pub permission_equipment: Permission,
-	pub permission_user: Permission,
-	pub permission_todo: Permission,
+	pub permission_equipment: (Permission, Permission),
+	pub permission_user: (Permission, Permission),
+	pub permission_todo: (Permission, Permission),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -106,9 +136,9 @@ impl Default for User {
 		Self {
 			id: -1,
 			username: "Guest".into(),
-			permission_equipment: Permission::ReadAny,
-			permission_user: Permission::ReadAny,
-			permission_todo: Permission::ReadAny,
+			permission_equipment: (Permission::ReadAny, Permission::WriteAny),
+			permission_user: (Permission::ReadAny, Permission::WriteAny),
+			permission_todo: (Permission::ReadAny, Permission::WriteAny),
 		}
 	}
 }
