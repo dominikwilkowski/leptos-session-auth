@@ -34,7 +34,7 @@ pub mod ssr {
 		pub async fn into_todo(self, pool: &PgPool) -> Todo {
 			Todo {
 				id: self.id,
-				user: User::get(self.user_id, pool).await,
+				user: User::get_from_id(self.user_id, pool).await,
 				title: self.title,
 				created_at: self.created_at,
 				completed: self.completed,

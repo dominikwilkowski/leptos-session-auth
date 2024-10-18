@@ -2,10 +2,67 @@ use leptos::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Permission {
+	ReadAny,
+	Read(Vec<i32>),
+	WriteAny,
+	Write(Vec<i32>),
+}
+
+impl Permission {
+	pub fn parse(_perm: String) -> Permission {
+		Permission::ReadAny
+	}
+}
+
+#[test]
+fn permission_parse_test() {
+	assert_eq!(Permission::parse(String::from("READ(*)")), Permission::ReadAny);
+	assert_eq!(Permission::parse(String::from("READ(1,2,4564,789)")), Permission::Read(vec![1, 2, 4564, 789]));
+	assert_eq!(Permission::parse(String::from("READ(5, 99, 0)")), Permission::Read(vec![5, 99, 0]));
+
+	assert_eq!(Permission::parse(String::from("WRITE(*)")), Permission::WriteAny);
+	assert_eq!(Permission::parse(String::from("WRITE(1,2,4564,789)")), Permission::Write(vec![1, 2, 4564, 789]));
+	assert_eq!(Permission::parse(String::from("WRITE(5, 99, 0)")), Permission::Write(vec![5, 99, 0]));
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct User {
 	pub id: i32,
 	pub username: String,
-	pub permissions: Vec<String>,
+	pub permission_equipment: Permission,
+	pub permission_user: Permission,
+	pub permission_todo: Permission,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ssr", derive(sqlx::FromRow))]
+pub struct UserSQL {
+	pub id: i32,
+	pub username: String,
+	pub password: String,
+	pub permission_equipment: String,
+	pub permission_user: String,
+	pub permission_todo: String,
+}
+
+impl From<UserSQL> for User {
+	fn from(val: UserSQL) -> Self {
+		User {
+			id: val.id,
+			username: val.username,
+			permission_equipment: Permission::parse(val.permission_equipment),
+			permission_user: Permission::parse(val.permission_user),
+			permission_todo: Permission::parse(val.permission_todo),
+		}
+	}
+}
+
+impl UserSQL {
+	pub fn into_user(self) -> (User, UserPasshash) {
+		let password = self.password.clone();
+		(self.into(), UserPasshash(password))
+	}
 }
 
 // Explicitly is not Serialize/Deserialize!
@@ -14,19 +71,19 @@ pub struct UserPasshash(String);
 
 impl Default for User {
 	fn default() -> Self {
-		let permissions = Vec::new();
-
 		Self {
 			id: -1,
 			username: "Guest".into(),
-			permissions,
+			permission_equipment: Permission::ReadAny,
+			permission_user: Permission::ReadAny,
+			permission_todo: Permission::ReadAny,
 		}
 	}
 }
 
 #[cfg(feature = "ssr")]
 pub mod ssr {
-	pub use super::{User, UserPasshash};
+	pub use super::{User, UserPasshash, UserSQL};
 	pub use argon2::{
 		self,
 		password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
@@ -42,41 +99,25 @@ pub mod ssr {
 	pub type AuthSession = axum_session_auth::AuthSession<User, i32, SessionPgPool, PgPool>;
 
 	impl User {
-		pub async fn get_with_passhash(id: i32, pool: &PgPool) -> Option<(Self, UserPasshash)> {
+		pub async fn get_from_id_with_passhash(id: i32, pool: &PgPool) -> Option<(Self, UserPasshash)> {
 			let sqluser =
-				sqlx::query_as::<_, SqlUser>("SELECT * FROM users WHERE id = $1").bind(id).fetch_one(pool).await.ok()?;
+				sqlx::query_as::<_, UserSQL>("SELECT * FROM users WHERE id = $1").bind(id).fetch_one(pool).await.ok()?;
 
-			// let's just get all the tokens the user can use, we will only use the full permissions if modifying them.
-			let sql_user_perms =
-				sqlx::query_as::<_, SqlPermissionTokens>("SELECT token FROM user_permissions WHERE user_id = $1;")
-					.bind(id)
-					.fetch_all(pool)
-					.await
-					.ok()?;
-
-			Some(sqluser.into_user(Some(sql_user_perms)))
+			Some(sqluser.into_user())
 		}
 
-		pub async fn get(id: i32, pool: &PgPool) -> Option<Self> {
-			User::get_with_passhash(id, pool).await.map(|(user, _)| user)
+		pub async fn get_from_id(id: i32, pool: &PgPool) -> Option<Self> {
+			User::get_from_id_with_passhash(id, pool).await.map(|(user, _)| user)
 		}
 
 		pub async fn get_from_username_with_passhash(name: String, pool: &PgPool) -> Option<(Self, UserPasshash)> {
-			let sqluser = sqlx::query_as::<_, SqlUser>("SELECT * FROM users WHERE username = $1")
+			let sqluser = sqlx::query_as::<_, UserSQL>("SELECT * FROM users WHERE username = $1")
 				.bind(name)
 				.fetch_one(pool)
 				.await
 				.ok()?;
 
-			//lets just get all the tokens the user can use, we will only use the full permissions if modifying them.
-			let sql_user_perms =
-				sqlx::query_as::<_, SqlPermissionTokens>("SELECT token FROM user_permissions WHERE user_id = $1;")
-					.bind(sqluser.id)
-					.fetch_all(pool)
-					.await
-					.ok()?;
-
-			Some(sqluser.into_user(Some(sql_user_perms)))
+			Some(sqluser.into_user())
 		}
 
 		pub async fn get_from_username(name: String, pool: &PgPool) -> Option<Self> {
@@ -84,16 +125,11 @@ pub mod ssr {
 		}
 	}
 
-	#[derive(sqlx::FromRow, Clone)]
-	pub struct SqlPermissionTokens {
-		pub token: String,
-	}
-
 	#[async_trait]
 	impl Authentication<User, i32, PgPool> for User {
 		async fn load_user(userid: i32, pool: Option<&PgPool>) -> Result<User, anyhow::Error> {
 			let pool = pool.unwrap();
-			User::get(userid, pool).await.ok_or_else(|| anyhow::anyhow!("Cannot get user"))
+			User::get_from_id(userid, pool).await.ok_or_else(|| anyhow::anyhow!("Cannot get user"))
 		}
 
 		fn is_authenticated(&self) -> bool {
@@ -115,30 +151,6 @@ pub mod ssr {
 	// 		self.permissions.contains(&perm.to_string())
 	// 	}
 	// }
-
-	#[derive(sqlx::FromRow, Clone)]
-	pub struct SqlUser {
-		pub id: i32,
-		pub username: String,
-		pub password: String,
-	}
-
-	impl SqlUser {
-		pub fn into_user(self, sql_user_perms: Option<Vec<SqlPermissionTokens>>) -> (User, UserPasshash) {
-			(
-				User {
-					id: self.id,
-					username: self.username,
-					permissions: if let Some(user_perms) = sql_user_perms {
-						user_perms.into_iter().map(|x| x.token).collect::<Vec<String>>()
-					} else {
-						Vec::<String>::new()
-					},
-				},
-				UserPasshash(self.password),
-			)
-		}
-	}
 }
 
 #[server]
