@@ -4,6 +4,8 @@ use leptos::*;
 use leptos_meta::*;
 use leptos_router::*;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "ssr")]
+use std::fmt::Write;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Todo {
@@ -50,10 +52,32 @@ pub async fn get_todos() -> Result<Vec<Todo>, ServerFnError> {
 	use sqlx::PgPool;
 
 	let pool = use_context::<PgPool>().expect("Database not initialized");
+	let user = get_user().await?;
+
+	let mut query = String::from("SELECT * FROM todos");
+	match user {
+		Some(user) => match user.permission_todo {
+			Permissions::ReadWrite {
+				read: Permission::Read(ids),
+				write: _,
+			} => {
+				query.push_str(" WHERE id IN (");
+				for (i, id) in ids.iter().enumerate() {
+					if i != 0 {
+						query.push(',');
+					}
+					write!(&mut query, "{}", id).unwrap();
+				}
+				query.push_str(")");
+			},
+			_ => {},
+		},
+		None => return Err(ServerFnError::Request(String::from("User not authenticated"))),
+	};
 
 	Ok(
 		join_all(
-			sqlx::query_as::<_, SqlTodo>("SELECT * FROM todos")
+			sqlx::query_as::<_, SqlTodo>(&query)
 				.fetch_all(&pool)
 				.await?
 				.iter()
