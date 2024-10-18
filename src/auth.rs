@@ -10,20 +10,52 @@ pub enum Permission {
 }
 
 impl Permission {
-	pub fn parse(_perm: String) -> Permission {
-		Permission::ReadAny
+	pub fn parse(perm: String) -> Result<Permission, String> {
+		match perm.replace(" ", "").replace(")", "").to_uppercase().as_str() {
+			"READ(*" => Ok(Permission::ReadAny),
+			"WRITE(*" => Ok(Permission::WriteAny),
+			cleaned_perm => {
+				let parts = cleaned_perm.split("(").collect::<Vec<&str>>();
+				if parts.len() != 2 {
+					return Err(String::from("Invalid permission string"));
+				}
+
+				let scope = parts[1].split(",").collect::<Vec<&str>>();
+				let mut numbers = Vec::new();
+
+				for item in &scope {
+					match item.parse::<i32>() {
+						Ok(num) => numbers.push(num),
+						Err(_) => return Err(String::from("Invalid permission string")),
+					}
+				}
+
+				match parts[0] {
+					"READ" => Ok(Permission::Read(numbers)),
+					"WRITE" => Ok(Permission::Write(numbers)),
+					_ => Err(String::from("Invalid permission string")),
+				}
+			},
+		}
 	}
 }
 
 #[test]
 fn permission_parse_test() {
-	assert_eq!(Permission::parse(String::from("READ(*)")), Permission::ReadAny);
-	assert_eq!(Permission::parse(String::from("READ(1,2,4564,789)")), Permission::Read(vec![1, 2, 4564, 789]));
-	assert_eq!(Permission::parse(String::from("READ(5, 99, 0)")), Permission::Read(vec![5, 99, 0]));
+	assert_eq!(Permission::parse(String::from("READ(*)")), Ok(Permission::ReadAny));
+	assert_eq!(Permission::parse(String::from("READ( * )")), Ok(Permission::ReadAny));
+	assert_eq!(Permission::parse(String::from("READ (*)")), Ok(Permission::ReadAny));
+	assert_eq!(Permission::parse(String::from("read(*)")), Ok(Permission::ReadAny));
+	assert_eq!(Permission::parse(String::from("READ(1,2,4564,789)")), Ok(Permission::Read(vec![1, 2, 4564, 789])));
+	assert_eq!(Permission::parse(String::from("READ(5, 99, 0)")), Ok(Permission::Read(vec![5, 99, 0])));
 
-	assert_eq!(Permission::parse(String::from("WRITE(*)")), Permission::WriteAny);
-	assert_eq!(Permission::parse(String::from("WRITE(1,2,4564,789)")), Permission::Write(vec![1, 2, 4564, 789]));
-	assert_eq!(Permission::parse(String::from("WRITE(5, 99, 0)")), Permission::Write(vec![5, 99, 0]));
+	assert_eq!(Permission::parse(String::from("WRITE(*)")), Ok(Permission::WriteAny));
+	assert_eq!(Permission::parse(String::from("WRITE(1,2,3,4)")), Ok(Permission::Write(vec![1, 2, 3, 4])));
+	assert_eq!(Permission::parse(String::from("WRITE(5, 99   , 0 )")), Ok(Permission::Write(vec![5, 99, 0])));
+
+	assert_eq!(Permission::parse(String::from("READ")), Err(String::from("Invalid permission string")));
+	assert_eq!(Permission::parse(String::from("READ(1,2,x,4)")), Err(String::from("Invalid permission string")));
+	assert_eq!(Permission::parse(String::from("FOO(1,2,3)")), Err(String::from("Invalid permission string")));
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,9 +83,9 @@ impl From<UserSQL> for User {
 		User {
 			id: val.id,
 			username: val.username,
-			permission_equipment: Permission::parse(val.permission_equipment),
-			permission_user: Permission::parse(val.permission_user),
-			permission_todo: Permission::parse(val.permission_todo),
+			permission_equipment: Permission::parse(val.permission_equipment).expect("Invalid permission string"),
+			permission_user: Permission::parse(val.permission_user).expect("Invalid permission string"),
+			permission_todo: Permission::parse(val.permission_todo).expect("Invalid permission string"),
 		}
 	}
 }
