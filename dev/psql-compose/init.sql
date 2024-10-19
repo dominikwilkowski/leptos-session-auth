@@ -11,7 +11,7 @@ CREATE TABLE users (
 INSERT INTO users
   (username, password, permission_equipment, permission_user, permission_todo)
   VALUES
-  ('dom', '$argon2id$v=19$m=19456,t=2,p=1$T9GO2wvNWMGcMQ/uPdH8lQ$EjVtyckTRnjly15GvDW3RAo2GvZPT/Dv7prpRDv6YcI', 'READ(*)|WRITE(*)', 'READ(*)|WRITE(*)', 'READ(2)|WRITE(2)'),
+  ('dom', '$argon2id$v=19$m=19456,t=2,p=1$T9GO2wvNWMGcMQ/uPdH8lQ$EjVtyckTRnjly15GvDW3RAo2GvZPT/Dv7prpRDv6YcI', 'READ(*)|WRITE(*)', 'READ(*)|WRITE(*)', 'READ(id[2])|WRITE(id[2])'),
   ('thewizzy', '$argon2id$v=19$m=19456,t=2,p=1$jGpHvsSseOmqYpSjYmHsDw$C/tnsXIf8dEdGojiKDcYis3e7gniaT40jvqIyFzri4c', 'READ(*)|WRITE(*)', 'READ(*)|WRITE(*)', 'READ(*)|WRITE(*)');
 -- password for both: test
 

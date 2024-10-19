@@ -4,6 +4,7 @@ pub mod error_template;
 pub mod errors;
 #[cfg(feature = "ssr")]
 pub mod fallback;
+pub mod permission;
 #[cfg(feature = "ssr")]
 pub mod state;
 pub mod todo;
