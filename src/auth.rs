@@ -9,11 +9,6 @@ pub enum Permission {
 	Write(Vec<i32>),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Permissions {
-	ReadWrite { read: Permission, write: Permission },
-}
-
 impl Permission {
 	pub fn parse(perm: String) -> Result<Permissions, &'static str> {
 		let perms: String = perm.chars().filter(|&c| c != ' ' && c != ')').map(|c| c.to_ascii_uppercase()).collect();
@@ -167,6 +162,15 @@ fn permission_parse_test() {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Permissions {
+	ReadWrite { read: Permission, write: Permission },
+}
+
+// Explicitly not Serialize/Deserialize
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UserPasshash(String);
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct User {
 	pub id: i32,
 	pub username: String,
@@ -204,10 +208,6 @@ impl UserSQL {
 		(self.into(), UserPasshash(password))
 	}
 }
-
-// Explicitly is not Serialize/Deserialize!
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct UserPasshash(String);
 
 impl Default for User {
 	fn default() -> Self {
@@ -293,13 +293,6 @@ pub mod ssr {
 			false
 		}
 	}
-
-	// #[async_trait]
-	// impl HasPermission<PgPool> for User {
-	// 	async fn has(&self, perm: &str, _pool: &Option<&PgPool>) -> bool {
-	// 		self.permissions.contains(&perm.to_string())
-	// 	}
-	// }
 }
 
 #[server]
@@ -324,7 +317,7 @@ pub async fn login(username: String, password: String, remember: Option<String>)
 		.ok_or_else(|| ServerFnError::new("Username or Password does not match."))?;
 
 	let parsed_hash = PasswordHash::new(&expected_passhash)
-		.map_err(|error| ServerFnError::<NoCustomError>::ServerError(format!("Hashing parsing error: {}", error)))?;
+		.map_err(|error| ServerFnError::<NoCustomError>::ServerError(format!("Hash parsing error: {}", error)))?;
 
 	match Argon2::default().verify_password(password.as_bytes(), &parsed_hash) {
 		Ok(_) => {
@@ -361,11 +354,16 @@ pub async fn signup(
 		.map_err(|error| ServerFnError::<NoCustomError>::ServerError(format!("Hashing error: {}", error)))?
 		.to_string();
 
-	sqlx::query("INSERT INTO users (username, password) VALUES ($1, $2)")
-		.bind(username.clone())
-		.bind(password_hashed)
-		.execute(&pool)
-		.await?;
+	sqlx::query(
+		"INSERT INTO users
+		(username, password, permission_equipment, permission_user, permission_todo)
+		VALUES
+		($1, $2, 'READ(*)|WRITE(*)', 'READ(*)|WRITE(*)', 'READ(*)|WRITE(*)')",
+	)
+	.bind(username.clone())
+	.bind(password_hashed)
+	.execute(&pool)
+	.await?;
 
 	let user = User::get_from_username(username, &pool)
 		.await
