@@ -56,11 +56,12 @@ pub async fn get_todos() -> Result<Vec<Todo>, ServerFnError> {
 
 	let mut query = String::from("SELECT * FROM todos");
 	match user {
-		Some(user) => match user.permission_todo {
-			Permissions::ReadWrite {
+		Some(user) => {
+			if let Permissions::ReadWrite {
 				read: Permission::Read(ids),
 				write: _,
-			} => {
+			} = user.permission_todo
+			{
 				query.push_str(" WHERE id IN (");
 				for (i, id) in ids.iter().enumerate() {
 					if i != 0 {
@@ -68,9 +69,8 @@ pub async fn get_todos() -> Result<Vec<Todo>, ServerFnError> {
 					}
 					write!(&mut query, "{}", id).unwrap();
 				}
-				query.push_str(")");
-			},
-			_ => {},
+				query.push(')');
+			}
 		},
 		None => return Err(ServerFnError::Request(String::from("User not authenticated"))),
 	};

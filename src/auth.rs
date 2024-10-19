@@ -26,7 +26,7 @@ impl Permission {
 				"READ(*" => read_ids.push(-1),
 				"WRITE(*" => write_ids.push(-1),
 				cleaned_perm => {
-					let (action, scope) = cleaned_perm.split_once('(').ok_or_else(|| "Invalid permission string")?;
+					let (action, scope) = cleaned_perm.split_once('(').ok_or("Invalid permission string")?;
 
 					let scope = scope.split(",").collect::<Vec<&str>>();
 					let mut ids = Vec::with_capacity(scope.len());
@@ -63,7 +63,7 @@ impl Permission {
 			} else {
 				// If we have a list of ids in write let's make sure each id is also readable
 				for id in &write_ids {
-					if !read_ids.contains(&id) {
+					if !read_ids.contains(id) {
 						read_ids.push(*id);
 					}
 				}
