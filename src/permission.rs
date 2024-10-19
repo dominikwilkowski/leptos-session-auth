@@ -158,7 +158,9 @@ impl Permission {
 					write!(&mut query, "person IN ({person_ids})").unwrap();
 				}
 			},
-			Permission::Write(_) => {},
+			Permission::Write(_) => {
+				// TODO
+			},
 		}
 
 		query
