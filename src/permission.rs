@@ -4,7 +4,6 @@ use std::fmt::Write;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Scope {
-	Id(i32),
 	Equipment(i32),
 	Person(i32),
 	Any,
@@ -16,6 +15,16 @@ pub enum Permission {
 	Read(Vec<Scope>),
 	WriteAny,
 	Write(Vec<Scope>),
+	Create(bool),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Permissions {
+	ReadWrite {
+		read: Permission,
+		write: Permission,
+		create: Permission,
+	},
 }
 
 #[cfg(feature = "ssr")]
@@ -25,11 +34,14 @@ impl Permission {
 
 		let mut read_scopes = Vec::new();
 		let mut write_scopes = Vec::new();
+		let mut create_scope = None;
 
 		for perm in perms.split("|") {
 			match perm {
 				"READ(*" => read_scopes.push(Scope::Any),
 				"WRITE(*" => write_scopes.push(Scope::Any),
+				"CREATE(TRUE" => create_scope = Some(true),
+				"CREATE(FALSE" => create_scope = Some(false),
 				cleaned_perm => {
 					let (action, scope) = cleaned_perm.split_once('(').ok_or("Invalid permission string (No scope found)")?;
 
@@ -46,15 +58,6 @@ impl Permission {
 						};
 
 						match &scope_str[..open_paren] {
-							"ID" => match action {
-								"READ" => {
-									read_scopes.push(Scope::Id(id));
-								},
-								"WRITE" => {
-									write_scopes.push(Scope::Id(id));
-								},
-								_ => return Err("Invalid permission string (Unrecognized action)"),
-							},
 							"EQUIPMENT" => match action {
 								"READ" => {
 									read_scopes.push(Scope::Equipment(id));
@@ -80,7 +83,7 @@ impl Permission {
 			}
 		}
 
-		if read_scopes.is_empty() || write_scopes.is_empty() {
+		if read_scopes.is_empty() || write_scopes.is_empty() || create_scope.is_none() {
 			Err("Invalid permission string (No action/scope found)")
 		} else {
 			let (read, write) = if write_scopes.contains(&Scope::Any) {
@@ -99,27 +102,30 @@ impl Permission {
 				(Permission::Read(read_scopes), Permission::Write(write_scopes))
 			};
 
-			Ok(Permissions::ReadWrite { read, write })
+			Ok(Permissions::ReadWrite {
+				read,
+				write,
+				create: Permission::Create(create_scope.unwrap()),
+			})
 		}
 	}
 
-	pub fn get_query(&self) -> String {
+	pub fn get_query_select(&self, field: &str) -> String {
+		let field_sanitized = match field {
+			"id" => "id",
+			"equipment" => "equipment",
+			_ => "id",
+		};
+
 		let mut query = String::new();
 		match self {
-			Permission::ReadAny | Permission::WriteAny => {},
+			Permission::ReadAny | Permission::WriteAny | Permission::Write(_) | Permission::Create(_) => {},
 			Permission::Read(scope) => {
-				let mut id_ids = String::new();
 				let mut equipment_ids = String::new();
 				let mut person_ids = String::new();
 
 				for item in scope.iter() {
 					match item {
-						Scope::Id(id) => {
-							if !id_ids.is_empty() {
-								id_ids.push(',');
-							}
-							write!(&mut id_ids, "{id}").unwrap();
-						},
 						Scope::Equipment(id) => {
 							if !equipment_ids.is_empty() {
 								equipment_ids.push(',');
@@ -137,18 +143,11 @@ impl Permission {
 				}
 
 				let mut first_clause = true;
-				if !id_ids.is_empty() || !equipment_ids.is_empty() || !person_ids.is_empty() {
+				if !equipment_ids.is_empty() || !person_ids.is_empty() {
 					write!(&mut query, " WHERE ").unwrap();
 				}
-				if !id_ids.is_empty() {
-					write!(&mut query, "id IN ({id_ids})").unwrap();
-					first_clause = false;
-				}
 				if !equipment_ids.is_empty() {
-					if !first_clause {
-						write!(&mut query, " AND ").unwrap();
-					}
-					write!(&mut query, "equipment IN ({equipment_ids})").unwrap();
+					write!(&mut query, "{field_sanitized} IN ({equipment_ids})").unwrap();
 					first_clause = false;
 				}
 				if !person_ids.is_empty() {
@@ -158,206 +157,290 @@ impl Permission {
 					write!(&mut query, "person IN ({person_ids})").unwrap();
 				}
 			},
-			Permission::Write(_) => {
-				// TODO
-			},
 		}
 
 		query
 	}
+
+	pub fn get_query_select_without_where(&self, field: &str) -> String {
+		self.get_query_select(field).replace("WHERE", "AND")
+	}
 }
 
-#[test]
-fn permission_parse_test() {
-	assert_eq!(
-		Permission::parse(String::from("READ(*)|WRITE(*)")),
-		Ok(Permissions::ReadWrite {
-			read: Permission::ReadAny,
-			write: Permission::WriteAny
-		})
-	);
-	assert_eq!(
-		Permission::parse(String::from("READ(id[1])|WRITE(id[1])")),
-		Ok(Permissions::ReadWrite {
-			read: Permission::Read(vec![Scope::Id(1)]),
-			write: Permission::Write(vec![Scope::Id(1)])
-		})
-	);
-	assert_eq!(
-		Permission::parse(String::from("READ(equipment[1])|WRITE(equipment[1])")),
-		Ok(Permissions::ReadWrite {
-			read: Permission::Read(vec![Scope::Equipment(1)]),
-			write: Permission::Write(vec![Scope::Equipment(1)])
-		})
-	);
-	assert_eq!(
-		Permission::parse(String::from("READ(person[1])|WRITE(person[1])")),
-		Ok(Permissions::ReadWrite {
-			read: Permission::Read(vec![Scope::Person(1)]),
-			write: Permission::Write(vec![Scope::Person(1)])
-		})
-	);
-	assert_eq!(
-		Permission::parse(String::from("READ(*)|WRITE(id[1],equipment[5],person[7])")),
-		Ok(Permissions::ReadWrite {
-			read: Permission::ReadAny,
-			write: Permission::Write(vec![Scope::Id(1), Scope::Equipment(5), Scope::Person(7)]),
-		})
-	);
+#[cfg(test)]
+mod tests {
+	use super::*;
 
-	assert_eq!(
-		Permission::parse(String::from("WriTE(*)|REad(*)")),
-		Ok(Permissions::ReadWrite {
-			read: Permission::ReadAny,
-			write: Permission::WriteAny
-		})
-	);
-	assert_eq!(
-		Permission::parse(String::from("READ( * )|WRITE(* )")),
-		Ok(Permissions::ReadWrite {
-			read: Permission::ReadAny,
-			write: Permission::WriteAny
-		})
-	);
-	assert_eq!(
-		Permission::parse(String::from("READ (*) | WRITE( *)")),
-		Ok(Permissions::ReadWrite {
-			read: Permission::ReadAny,
-			write: Permission::WriteAny
-		})
-	);
-	assert_eq!(
-		Permission::parse(String::from("read(*)|write(*)")),
-		Ok(Permissions::ReadWrite {
-			read: Permission::ReadAny,
-			write: Permission::WriteAny
-		})
-	);
-	assert_eq!(
-		Permission::parse(String::from("READ(id[1],id[2],id[4564],id[789])|WRITE(id[1],id[2],id[3],id[4])")),
-		Ok(Permissions::ReadWrite {
-			read: Permission::Read(vec![
-				Scope::Id(1),
-				Scope::Id(2),
-				Scope::Id(4564),
-				Scope::Id(789),
-				Scope::Id(3),
-				Scope::Id(4)
-			]),
-			write: Permission::Write(vec![Scope::Id(1), Scope::Id(2), Scope::Id(3), Scope::Id(4)])
-		})
-	);
-	assert_eq!(
-		Permission::parse(String::from("READ(id[5], id[99], id[0]) | WRITE(id[5], id[99]   , id[0] )")),
-		Ok(Permissions::ReadWrite {
-			read: Permission::Read(vec![Scope::Id(5), Scope::Id(99), Scope::Id(0)]),
-			write: Permission::Write(vec![Scope::Id(5), Scope::Id(99), Scope::Id(0)])
-		})
-	);
+	#[test]
+	fn permission_parse_test() {
+		assert_eq!(
+			Permission::parse(String::from("READ(*)|WRITE(*)|CREATE(false)")),
+			Ok(Permissions::ReadWrite {
+				read: Permission::ReadAny,
+				write: Permission::WriteAny,
+				create: Permission::Create(false),
+			})
+		);
+		assert_eq!(
+			Permission::parse(String::from("READ(equipment[1])|WRITE(equipment[1])|CREATE(true)")),
+			Ok(Permissions::ReadWrite {
+				read: Permission::Read(vec![Scope::Equipment(1)]),
+				write: Permission::Write(vec![Scope::Equipment(1)]),
+				create: Permission::Create(true),
+			})
+		);
+		assert_eq!(
+			Permission::parse(String::from("READ(equipment[1])|WRITE(equipment[1])|CREATE(false)")),
+			Ok(Permissions::ReadWrite {
+				read: Permission::Read(vec![Scope::Equipment(1)]),
+				write: Permission::Write(vec![Scope::Equipment(1)]),
+				create: Permission::Create(false),
+			})
+		);
+		assert_eq!(
+			Permission::parse(String::from("READ(person[1])|WRITE(person[1])|CREATE(false)")),
+			Ok(Permissions::ReadWrite {
+				read: Permission::Read(vec![Scope::Person(1)]),
+				write: Permission::Write(vec![Scope::Person(1)]),
+				create: Permission::Create(false),
+			})
+		);
+		assert_eq!(
+			Permission::parse(String::from("READ(*)|WRITE(equipment[1],equipment[5],person[7])|CREATE(false)")),
+			Ok(Permissions::ReadWrite {
+				read: Permission::ReadAny,
+				write: Permission::Write(vec![Scope::Equipment(1), Scope::Equipment(5), Scope::Person(7)]),
+				create: Permission::Create(false),
+			})
+		);
 
-	assert_eq!(
-		Permission::parse(String::from("READ(id[1],id[2])|WRITE(id[1],id[2],id[3])")),
-		Ok(Permissions::ReadWrite {
-			read: Permission::Read(vec![Scope::Id(1), Scope::Id(2), Scope::Id(3)]),
-			write: Permission::Write(vec![Scope::Id(1), Scope::Id(2), Scope::Id(3)])
-		})
-	);
-	assert_eq!(
-		Permission::parse(String::from("READ(id[1],id[2],id[3])|WRITE(id[1],id[2])")),
-		Ok(Permissions::ReadWrite {
-			read: Permission::Read(vec![Scope::Id(1), Scope::Id(2), Scope::Id(3)]),
-			write: Permission::Write(vec![Scope::Id(1), Scope::Id(2)])
-		})
-	);
-	assert_eq!(
-		Permission::parse(String::from("READ(*)|WRITE(id[1],id[2])")),
-		Ok(Permissions::ReadWrite {
-			read: Permission::ReadAny,
-			write: Permission::Write(vec![Scope::Id(1), Scope::Id(2)])
-		})
-	);
-	assert_eq!(
-		Permission::parse(String::from("READ(id[1],id[2])|WRITE(*)")),
-		Ok(Permissions::ReadWrite {
-			read: Permission::ReadAny,
-			write: Permission::WriteAny
-		})
-	);
+		assert_eq!(
+			Permission::parse(String::from("WriTE(*)|REad(*)|CREATE(true)")),
+			Ok(Permissions::ReadWrite {
+				read: Permission::ReadAny,
+				write: Permission::WriteAny,
+				create: Permission::Create(true),
+			})
+		);
+		assert_eq!(
+			Permission::parse(String::from("READ( * )|WRITE(* )|CREATE( true )")),
+			Ok(Permissions::ReadWrite {
+				read: Permission::ReadAny,
+				write: Permission::WriteAny,
+				create: Permission::Create(true),
+			})
+		);
+		assert_eq!(
+			Permission::parse(String::from("READ (*) | WRITE( *)| CREATE(false )")),
+			Ok(Permissions::ReadWrite {
+				read: Permission::ReadAny,
+				write: Permission::WriteAny,
+				create: Permission::Create(false),
+			})
+		);
+		assert_eq!(
+			Permission::parse(String::from("read(*)|write(*)|create(FALSE)")),
+			Ok(Permissions::ReadWrite {
+				read: Permission::ReadAny,
+				write: Permission::WriteAny,
+				create: Permission::Create(false),
+			})
+		);
+		assert_eq!(
+			Permission::parse(String::from("READ(equipment[1],equipment[2],equipment[4564],equipment[789])|WRITE(equipment[1],equipment[2],equipment[3],equipment[4])|CREATE(false)")),
+			Ok(Permissions::ReadWrite {
+				read: Permission::Read(vec![
+					Scope::Equipment(1),
+					Scope::Equipment(2),
+					Scope::Equipment(4564),
+					Scope::Equipment(789),
+					Scope::Equipment(3),
+					Scope::Equipment(4),
+				]),
+				write: Permission::Write(vec![Scope::Equipment(1), Scope::Equipment(2), Scope::Equipment(3), Scope::Equipment(4)]),
+				create: Permission::Create(false),
+			})
+		);
+		assert_eq!(
+			Permission::parse(String::from(
+				"READ(equipment[5], equipment[99], equipment[0]) | WRITE(equipment[5], equipment[99]   , equipment[0] )| CREATE( true  )"
+			)),
+			Ok(Permissions::ReadWrite {
+				read: Permission::Read(vec![Scope::Equipment(5), Scope::Equipment(99), Scope::Equipment(0)]),
+				write: Permission::Write(vec![Scope::Equipment(5), Scope::Equipment(99), Scope::Equipment(0)]),
+				create: Permission::Create(true),
+			})
+		);
 
-	assert_eq!(Permission::parse(String::from("READ||WRITE(id[1])")), Err("Invalid permission string (No scope found)"));
-	assert_eq!(Permission::parse(String::from("READ(id[1])||WRITE")), Err("Invalid permission string (No scope found)"));
-	assert_eq!(Permission::parse(String::from("READ(id[1])")), Err("Invalid permission string (No action/scope found)"));
-	assert_eq!(Permission::parse(String::from("WRITE(id[1])")), Err("Invalid permission string (No action/scope found)"));
-	assert_eq!(Permission::parse(String::from("READ(||WRITE(id[1])")), Err("Invalid permission string (Missing id)"));
-	assert_eq!(Permission::parse(String::from("READ()|WRITE(id[1])")), Err("Invalid permission string (Missing id)"));
-	assert_eq!(Permission::parse(String::from("READ(id)|WRITE(id[1])")), Err("Invalid permission string (Missing id)"));
-	assert_eq!(Permission::parse(String::from("READ(id[)|WRITE(id[1])")), Err("Invalid permission string (Missing id)"));
-	assert_eq!(
-		Permission::parse(String::from("READ(id[5])|WRITE(id[1],*)")),
-		Err("Invalid permission string (Missing id)")
-	);
-	assert_eq!(
-		Permission::parse(String::from("READ(id[])|WRITE(id[1])")),
-		Err("Invalid permission string (Could not parse id)")
-	);
-	assert_eq!(
-		Permission::parse(String::from("READ(id[1],id[2],id[x],id[4])|WRITE(id[1])")),
-		Err("Invalid permission string (Could not parse id)")
-	);
-	assert_eq!(
-		Permission::parse(String::from("FOO(id[1],id[2],id[3])|WRITE(id[1])")),
-		Err("Invalid permission string (Unrecognized action)")
-	);
-	assert_eq!(
-		Permission::parse(String::from("READ(id[1],x[2],id[3])|WRITE(id[1])")),
-		Err("Invalid permission string (Unrecognized scope)")
-	);
-}
+		assert_eq!(
+			Permission::parse(String::from(
+				"READ(equipment[1],equipment[2])|WRITE(equipment[1],equipment[2],equipment[3])|CREATE(false)"
+			)),
+			Ok(Permissions::ReadWrite {
+				read: Permission::Read(vec![Scope::Equipment(1), Scope::Equipment(2), Scope::Equipment(3)]),
+				write: Permission::Write(vec![Scope::Equipment(1), Scope::Equipment(2), Scope::Equipment(3)]),
+				create: Permission::Create(false),
+			})
+		);
+		assert_eq!(
+			Permission::parse(String::from(
+				"READ(equipment[1],equipment[2],equipment[3])|WRITE(equipment[1],equipment[2])|CREATE(false)"
+			)),
+			Ok(Permissions::ReadWrite {
+				read: Permission::Read(vec![Scope::Equipment(1), Scope::Equipment(2), Scope::Equipment(3)]),
+				write: Permission::Write(vec![Scope::Equipment(1), Scope::Equipment(2)]),
+				create: Permission::Create(false),
+			})
+		);
+		assert_eq!(
+			Permission::parse(String::from("READ(*)|WRITE(equipment[1],equipment[2])|CREATE(FALSE)")),
+			Ok(Permissions::ReadWrite {
+				read: Permission::ReadAny,
+				write: Permission::Write(vec![Scope::Equipment(1), Scope::Equipment(2)]),
+				create: Permission::Create(false),
+			})
+		);
+		assert_eq!(
+			Permission::parse(String::from("READ(equipment[1],equipment[2])|WRITE(*)|CREATE(true)")),
+			Ok(Permissions::ReadWrite {
+				read: Permission::ReadAny,
+				write: Permission::WriteAny,
+				create: Permission::Create(true),
+			})
+		);
 
-#[test]
-fn get_query_text() {
-	assert_eq!(
-		Permission::Read(vec![Scope::Id(1), Scope::Id(2), Scope::Id(3)]).get_query(),
-		String::from(" WHERE id IN (1,2,3)")
-	);
-	assert_eq!(
-		Permission::Read(vec![Scope::Equipment(1), Scope::Equipment(2), Scope::Equipment(3)]).get_query(),
-		String::from(" WHERE equipment IN (1,2,3)")
-	);
-	assert_eq!(
-		Permission::Read(vec![Scope::Person(1), Scope::Person(2), Scope::Person(3)]).get_query(),
-		String::from(" WHERE person IN (1,2,3)")
-	);
+		assert_eq!(
+			Permission::parse(String::from("READ||WRITE(equipment[1])|CREATE(false)")),
+			Err("Invalid permission string (No scope found)")
+		);
+		assert_eq!(
+			Permission::parse(String::from("READ(equipment[1])||WRITE")),
+			Err("Invalid permission string (No scope found)")
+		);
+		assert_eq!(
+			Permission::parse(String::from("READ(equipment[1])|WRITE(equipment[1])|CREATE")),
+			Err("Invalid permission string (No scope found)")
+		);
+		assert_eq!(
+			Permission::parse(String::from("READ(equipment[1])")),
+			Err("Invalid permission string (No action/scope found)")
+		);
+		assert_eq!(
+			Permission::parse(String::from("WRITE(equipment[1])")),
+			Err("Invalid permission string (No action/scope found)")
+		);
+		assert_eq!(
+			Permission::parse(String::from("CREATE(false)")),
+			Err("Invalid permission string (No action/scope found)")
+		);
+		assert_eq!(
+			Permission::parse(String::from("READ(|WRITE(equipment[1])|CREATE(true)")),
+			Err("Invalid permission string (Missing id)")
+		);
+		assert_eq!(
+			Permission::parse(String::from("READ()|WRITE(equipment[1])|CREATE(true)")),
+			Err("Invalid permission string (Missing id)")
+		);
+		assert_eq!(
+			Permission::parse(String::from("READ(equipment)|WRITE(equipment[1])|CREATE(true)")),
+			Err("Invalid permission string (Missing id)")
+		);
+		assert_eq!(
+			Permission::parse(String::from("READ(equipment[)|WRITE(equipment[1])|CREATE(true)")),
+			Err("Invalid permission string (Missing id)")
+		);
+		assert_eq!(
+			Permission::parse(String::from("READ(equipment[5])|WRITE(equipment[1],*)|CREATE(true)")),
+			Err("Invalid permission string (Missing id)")
+		);
+		assert_eq!(
+			Permission::parse(String::from("READ(equipment[1])|WRITE(equipment[1])|CREATE(foo)")),
+			Err("Invalid permission string (Missing id)")
+		);
+		assert_eq!(
+			Permission::parse(String::from("READ(equipment[])|WRITE(equipment[1])|CREATE(true)")),
+			Err("Invalid permission string (Could not parse id)")
+		);
+		assert_eq!(
+			Permission::parse(String::from(
+				"READ(equipment[1],equipment[2],equipment[x],equipment[4])|WRITE(equipment[1])|CREATE(true)"
+			)),
+			Err("Invalid permission string (Could not parse id)")
+		);
+		assert_eq!(
+			Permission::parse(String::from("FOO(equipment[1],equipment[2],equipment[3])|WRITE(equipment[1])|CREATE(true)")),
+			Err("Invalid permission string (Unrecognized action)")
+		);
+		assert_eq!(
+			Permission::parse(String::from("READ(equipment[1],x[2],equipment[3])|WRITE(equipment[1])|CREATE(true)")),
+			Err("Invalid permission string (Unrecognized scope)")
+		);
+	}
 
-	assert_eq!(
-		Permission::Read(vec![Scope::Id(1), Scope::Id(2), Scope::Equipment(666), Scope::Equipment(42)]).get_query(),
-		String::from(" WHERE id IN (1,2) AND equipment IN (666,42)")
-	);
+	#[test]
+	fn get_query_select_test() {
+		assert_eq!(
+			Permission::Read(vec![Scope::Equipment(1), Scope::Equipment(2), Scope::Equipment(3)]).get_query_select("id"),
+			String::from(" WHERE id IN (1,2,3)")
+		);
+		assert_eq!(
+			Permission::Read(vec![Scope::Equipment(1), Scope::Equipment(2), Scope::Equipment(3)])
+				.get_query_select("equipment"),
+			String::from(" WHERE equipment IN (1,2,3)")
+		);
+		assert_eq!(
+			Permission::Read(vec![Scope::Person(1), Scope::Person(2), Scope::Person(3)]).get_query_select("id"),
+			String::from(" WHERE person IN (1,2,3)")
+		);
 
-	assert_eq!(
-		Permission::Read(vec![Scope::Id(1), Scope::Id(2), Scope::Person(666), Scope::Person(42)]).get_query(),
-		String::from(" WHERE id IN (1,2) AND person IN (666,42)")
-	);
+		assert_eq!(
+			Permission::Read(vec![Scope::Equipment(1), Scope::Equipment(2), Scope::Equipment(3)]).get_query_select("foo"),
+			String::from(" WHERE id IN (1,2,3)")
+		);
 
-	assert_eq!(
-		Permission::Read(vec![Scope::Person(1), Scope::Id(1), Scope::Equipment(1),]).get_query(),
-		String::from(" WHERE id IN (1) AND equipment IN (1) AND person IN (1)")
-	);
-	assert_eq!(
-		Permission::Read(vec![
-			Scope::Person(1),
-			Scope::Id(1),
-			Scope::Equipment(1),
-			Scope::Id(2),
-			Scope::Person(2),
-			Scope::Equipment(2)
-		])
-		.get_query(),
-		String::from(" WHERE id IN (1,2) AND equipment IN (1,2) AND person IN (1,2)")
-	);
-}
+		assert_eq!(
+			Permission::Read(vec![
+				Scope::Equipment(1),
+				Scope::Equipment(2),
+				Scope::Person(666),
+				Scope::Person(42)
+			])
+			.get_query_select("id"),
+			String::from(" WHERE id IN (1,2) AND person IN (666,42)")
+		);
+		assert_eq!(
+			Permission::Read(vec![
+				Scope::Person(666),
+				Scope::Person(42),
+				Scope::Equipment(1),
+				Scope::Equipment(2)
+			])
+			.get_query_select("equipment"),
+			String::from(" WHERE equipment IN (1,2) AND person IN (666,42)")
+		);
+		assert_eq!(
+			Permission::Read(vec![Scope::Person(1), Scope::Equipment(1),]).get_query_select("id"),
+			String::from(" WHERE id IN (1) AND person IN (1)")
+		);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Permissions {
-	ReadWrite { read: Permission, write: Permission },
+		assert_eq!(
+			Permission::Read(vec![
+				Scope::Person(1),
+				Scope::Equipment(1),
+				Scope::Person(2),
+				Scope::Equipment(2)
+			])
+			.get_query_select("id"),
+			String::from(" WHERE id IN (1,2) AND person IN (1,2)")
+		);
+	}
+
+	#[test]
+	fn get_query_select_without_where_test() {
+		assert_eq!(
+			Permission::Read(vec![Scope::Equipment(1), Scope::Equipment(2), Scope::Equipment(3)])
+				.get_query_select_without_where("id"),
+			String::from(" AND id IN (1,2,3)"),
+		);
+	}
 }

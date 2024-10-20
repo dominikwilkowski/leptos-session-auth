@@ -1,7 +1,7 @@
 use leptos::*;
 use serde::{Deserialize, Serialize};
 
-use crate::permission::{Permission, Permissions};
+use crate::permission::{Permission, Permissions, Scope};
 
 // Explicitly not Serialize/Deserialize
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -54,16 +54,19 @@ impl Default for User {
 			id: -1,
 			username: "Guest".into(),
 			permission_equipment: Permissions::ReadWrite {
-				read: Permission::ReadAny,
-				write: Permission::WriteAny,
+				read: Permission::Read(vec![Scope::Equipment(-1)]),
+				write: Permission::Write(vec![Scope::Equipment(-1)]),
+				create: Permission::Create(false),
 			},
 			permission_user: Permissions::ReadWrite {
-				read: Permission::ReadAny,
-				write: Permission::WriteAny,
+				read: Permission::Read(vec![Scope::Equipment(-1)]),
+				write: Permission::Write(vec![Scope::Equipment(-1)]),
+				create: Permission::Create(false),
 			},
 			permission_todo: Permissions::ReadWrite {
-				read: Permission::ReadAny,
-				write: Permission::WriteAny,
+				read: Permission::Read(vec![Scope::Equipment(-1)]),
+				write: Permission::Write(vec![Scope::Equipment(-1)]),
+				create: Permission::Create(false),
 			},
 		}
 	}

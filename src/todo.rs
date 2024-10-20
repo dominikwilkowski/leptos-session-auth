@@ -24,7 +24,7 @@ pub mod ssr {
 	#[derive(sqlx::FromRow, Clone)]
 	pub struct SqlTodo {
 		id: i32,
-		user_id: i32,
+		person: i32,
 		title: String,
 		created_at: DateTime<Utc>,
 		completed: bool,
@@ -34,7 +34,7 @@ pub mod ssr {
 		pub async fn into_todo(self, pool: &PgPool) -> Todo {
 			Todo {
 				id: self.id,
-				user: User::get_from_id(self.user_id, pool).await,
+				user: User::get_from_id(self.person, pool).await,
 				title: self.title,
 				created_at: self.created_at,
 				completed: self.completed,
@@ -56,8 +56,12 @@ pub async fn get_todos() -> Result<Vec<Todo>, ServerFnError> {
 	let mut query = String::from("SELECT * FROM todos");
 	match user {
 		Some(user) => {
-			let Permissions::ReadWrite { read: perm, write: _ } = user.permission_todo;
-			query.push_str(&perm.get_query());
+			let Permissions::ReadWrite {
+				read: perm,
+				write: _,
+				create: _,
+			} = user.permission_todo;
+			query.push_str(&perm.get_query_select("id"));
 		},
 		None => return Err(ServerFnError::Request(String::from("User not authenticated"))),
 	};
@@ -90,7 +94,7 @@ pub async fn add_todo(title: String) -> Result<(), ServerFnError> {
 	std::thread::sleep(std::time::Duration::from_millis(1250));
 
 	Ok(
-		sqlx::query!("INSERT INTO todos (title, user_id, completed) VALUES ($1, $2, false)", title, id)
+		sqlx::query!("INSERT INTO todos (title, person, completed) VALUES ($1, $2, false)", title, id)
 			.execute(&pool)
 			.await
 			.map(|_| ())?,
