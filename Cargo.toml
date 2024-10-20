@@ -32,13 +32,13 @@ sqlx = { version = "0.8", features = [
 ], optional = true }
 thiserror = "1.0"
 wasm-bindgen = "=0.2.93"
-axum_session_auth = { version = "0.14", optional = true }
-axum_session_sqlx = { version = "0.3", features = [ "postgres", "tls-rustls"], optional = true }
-axum_session = { version = "0.14", optional = true }
 async-trait = { version = "0.1", optional = true }
 dotenvy = "0.15.7"
 chrono = { version = "0.4", features = ["serde"] }
-argon2 = { version = "0.5.3", features = ["std"], optional = true }
+axum_session_auth = { version = "0.14", optional = true }
+axum_session_sqlx = { version = "0.3", features = [ "postgres", "tls-rustls"], optional = true }
+axum_session = { version = "0.14", optional = true }
+argon2 = { version = "0.5", features = ["std"], optional = true }
 
 [features]
 default = ["ssr"]
@@ -51,9 +51,9 @@ ssr = [
 	"dep:axum_session",
 	"dep:axum_session_auth",
 	"dep:axum_session_sqlx",
+	"dep:argon2",
 	"dep:async-trait",
 	"dep:sqlx",
-	"dep:argon2",
 	"dep:rand",
 	"leptos/ssr",
 	"leptos_meta/ssr",
